@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Automation Architecture — Project Pipeline</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f1117; color: #e1e4e8; padding: 24px; }
+
+  .header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 32px; }
+  .header h1 { font-size: 24px; font-weight: 600; color: #fff; }
+  .header .updated { font-size: 13px; color: #6b7280; }
+
+  .stats-row { display: grid; grid-template-columns: repeat(6, 1fr); gap: 16px; margin-bottom: 32px; }
+  .stat-card { background: #1a1d27; border-radius: 12px; padding: 20px; text-align: center; border: 1px solid #2d3140; }
+  .stat-card .number { font-size: 36px; font-weight: 700; margin-bottom: 4px; }
+  .stat-card .label { font-size: 12px; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.5px; }
+  .stat-card.discovery .number { color: #a78bfa; }
+  .stat-card.sprint .number { color: #60a5fa; }
+  .stat-card.qa .number { color: #fbbf24; }
+  .stat-card.uat .number { color: #f97316; }
+  .stat-card.prod .number { color: #34d399; }
+  .stat-card.blocked .number { color: #f87171; }
+
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 32px; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 24px; margin-bottom: 32px; }
+
+  .card { background: #1a1d27; border-radius: 12px; padding: 24px; border: 1px solid #2d3140; }
+  .card h2 { font-size: 16px; font-weight: 600; margin-bottom: 16px; color: #fff; }
+  .card h3 { font-size: 13px; font-weight: 600; margin: 16px 0 8px; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.5px; }
+
+  .chart-container { position: relative; height: 280px; }
+  .chart-container-wide { position: relative; height: 320px; }
+
+  .pipeline-table { width: 100%; border-collapse: collapse; }
+  .pipeline-table th { text-align: left; padding: 8px 12px; font-size: 11px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid #2d3140; }
+  .pipeline-table td { padding: 10px 12px; font-size: 14px; border-bottom: 1px solid #1f2333; }
+  .pipeline-table tr:hover { background: #1f2333; }
+
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+  .badge.discovery { background: #a78bfa22; color: #a78bfa; }
+  .badge.sprint { background: #60a5fa22; color: #60a5fa; }
+  .badge.qa { background: #fbbf2422; color: #fbbf24; }
+  .badge.uat { background: #f9731622; color: #f97316; }
+  .badge.prod { background: #34d39922; color: #34d399; }
+  .badge.blocked { background: #f8717122; color: #f87171; }
+
+  .days-cell { font-variant-numeric: tabular-nums; }
+  .days-warn { color: #fbbf24; }
+  .days-danger { color: #f87171; font-weight: 600; }
+
+  .aging-bar { height: 8px; border-radius: 4px; background: #2d3140; overflow: hidden; margin-top: 4px; }
+  .aging-bar-fill { height: 100%; border-radius: 4px; }
+
+  .filter-row { display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; }
+  .filter-btn { padding: 6px 14px; border-radius: 20px; border: 1px solid #2d3140; background: transparent; color: #9ca3af; font-size: 13px; cursor: pointer; transition: all 0.15s; }
+  .filter-btn:hover { border-color: #60a5fa; color: #60a5fa; }
+  .filter-btn.active { background: #60a5fa22; border-color: #60a5fa; color: #60a5fa; }
+
+  .alert-section { margin-bottom: 32px; }
+  .alert { display: flex; align-items: center; gap: 12px; padding: 14px 18px; border-radius: 10px; margin-bottom: 8px; font-size: 14px; }
+  .alert.warn { background: #fbbf2410; border: 1px solid #fbbf2433; }
+  .alert.danger { background: #f8717110; border: 1px solid #f8717133; }
+  .alert-icon { font-size: 18px; }
+  .alert-text strong { color: #fff; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Automation Architecture — Project Pipeline</h1>
+  <span class="updated">Last updated: March 9, 2026</span>
+</div>
+
+<!-- Stage counts -->
+<div class="stats-row">
+  <div class="stat-card discovery"><div class="number">1</div><div class="label">Discovery</div></div>
+  <div class="stat-card sprint"><div class="number">7</div><div class="label">Sprint</div></div>
+  <div class="stat-card qa"><div class="number">5</div><div class="label">QA</div></div>
+  <div class="stat-card uat"><div class="number">7</div><div class="label">UAT</div></div>
+  <div class="stat-card prod"><div class="number">9</div><div class="label">Prod</div></div>
+  <div class="stat-card blocked"><div class="number">3</div><div class="label">Blocked</div></div>
+</div>
+
+<!-- Alerts -->
+<div class="alert-section" id="alerts"></div>
+
+<!-- Charts row -->
+<div class="grid-2">
+  <div class="card">
+    <h2>Pipeline Distribution</h2>
+    <div class="chart-container"><canvas id="pipelineChart"></canvas></div>
+  </div>
+  <div class="card">
+    <h2>Sprint & QA Aging</h2>
+    <div class="chart-container"><canvas id="agingChart"></canvas></div>
+  </div>
+</div>
+
+<!-- Full project table -->
+<div class="card" style="margin-bottom: 32px;">
+  <h2>All Projects</h2>
+  <div class="filter-row">
+    <button class="filter-btn active" onclick="filterTable('all')">All (32)</button>
+    <button class="filter-btn" onclick="filterTable('discovery')">Discovery</button>
+    <button class="filter-btn" onclick="filterTable('sprint')">Sprint</button>
+    <button class="filter-btn" onclick="filterTable('qa')">QA</button>
+    <button class="filter-btn" onclick="filterTable('uat')">UAT</button>
+    <button class="filter-btn" onclick="filterTable('prod')">Prod</button>
+    <button class="filter-btn" onclick="filterTable('blocked')">Blocked</button>
+  </div>
+  <table class="pipeline-table" id="projectTable">
+    <thead>
+      <tr><th>Client</th><th>Channel</th><th>Stage</th><th>In Stage Since</th><th style="text-align:right">Days</th></tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+</div>
+
+<!-- Sprint & QA aging detail -->
+<div class="grid-2">
+  <div class="card">
+    <h2>Sprint Aging Detail</h2>
+    <div class="chart-container-wide"><canvas id="sprintAgingChart"></canvas></div>
+  </div>
+  <div class="card">
+    <h2>QA Aging Detail</h2>
+    <div class="chart-container-wide"><canvas id="qaAgingChart"></canvas></div>
+  </div>
+</div>
+
+<script>
+const projects = [
+  { client: "Cardello", channel: "#cardello-agent-discovery", stage: "discovery", since: "2026-02-26", days: 11 },
+  { client: "RecapBuddy", channel: "#recapbuddy-sprint2", stage: "sprint", since: "2025-06-21", days: 261 },
+  { client: "Rope", channel: "#rope-sprint", stage: "sprint", since: "2025-08-23", days: 198 },
+  { client: "PTG Content", channel: "#ptg-content-sprint2", stage: "sprint", since: "2025-10-31", days: 129 },
+  { client: "Pipeline IQ", channel: "#pipeline-iq-sprint3", stage: "sprint", since: "2025-11-03", days: 126 },
+  { client: "IC LinkedIn", channel: "#ic-linkedin-sprint2", stage: "sprint", since: "2026-01-05", days: 63 },
+  { client: "LinkedIn Outreach", channel: "#linkedin-outreach-sprint", stage: "sprint", since: "2026-01-14", days: 54 },
+  { client: "AAA Cold Email", channel: "#aaa-cold-email-outreach-sprint", stage: "sprint", since: "2026-01-19", days: 49 },
+  { client: "Fidelity", channel: "#fidelity-qa", stage: "qa", since: "2025-06-26", days: 256 },
+  { client: "WSPicks", channel: "#wspicks-qa", stage: "qa", since: "2025-10-02", days: 158 },
+  { client: "Golfers Unite", channel: "#golfers-unite-qa", stage: "qa", since: "2025-11-19", days: 110 },
+  { client: "Qistmirath", channel: "#qistmirath-qa", stage: "qa", since: "2026-01-19", days: 49 },
+  { client: "Cardello Project", channel: "#cardello-project-qa", stage: "qa", since: "2026-02-12", days: 25 },
+  { client: "CRM", channel: "#crm-uat", stage: "uat", since: "2025-06-24", days: 258 },
+  { client: "Vesper", channel: "#vesper-uat", stage: "uat", since: "2025-09-10", days: 180 },
+  { client: "IC Stripe", channel: "#ic-stripe-uat", stage: "uat", since: "2025-11-21", days: 108 },
+  { client: "Coral Triangle Blog", channel: "#coraltriangle-blog-uat", stage: "uat", since: "2025-12-05", days: 94 },
+  { client: "Gamma Income", channel: "#gamma-income-uat", stage: "uat", since: "2025-12-26", days: 73 },
+  { client: "Social Content Gen", channel: "#social-content-generator-uat", stage: "uat", since: "2026-01-20", days: 48 },
+  { client: "Thu Tides", channel: "#thu-tides-uat", stage: "uat", since: "2026-02-10", days: 27 },
+  { client: "CyndiSellsFlorida", channel: "#cyndisellsflorida-prod", stage: "prod", since: "2025-07-22", days: null },
+  { client: "AAA Proposal", channel: "#aaa-proposal-prod", stage: "prod", since: "2025-08-04", days: null },
+  { client: "Oracle AI", channel: "#oracle-ai-prod", stage: "prod", since: "2025-08-18", days: null },
+  { client: "AAA Calendar", channel: "#aaa-calendar-prod", stage: "prod", since: "2025-09-09", days: null },
+  { client: "Tax Zero", channel: "#tax-zero-prod", stage: "prod", since: "2025-09-25", days: null },
+  { client: "Floridian", channel: "#floridian-prod", stage: "prod", since: "2025-10-17", days: null },
+  { client: "People Street", channel: "#people-street-prod", stage: "prod", since: "2025-12-04", days: null },
+  { client: "iOptimize Realty", channel: "#ioptimize-realty-prod", stage: "prod", since: "2025-12-04", days: null },
+  { client: "AAA Form Report", channel: "#aaa-form-report-prod", stage: "prod", since: "2026-02-04", days: null },
+  { client: "Junk Genies", channel: "#junk-genies-blocked", stage: "blocked", since: "2025-10-02", days: 158 },
+  { client: "Alt Lending", channel: "#alt-lending-blocked", stage: "blocked", since: "2025-11-11", days: 118 },
+  { client: "PTG Automations", channel: "#ptg-automations-blocked", stage: "blocked", since: "2026-02-27", days: 10 },
+];
+
+const stageColors = {
+  discovery: '#a78bfa',
+  sprint: '#60a5fa',
+  qa: '#fbbf24',
+  uat: '#f97316',
+  prod: '#34d399',
+  blocked: '#f87171'
+};
+
+const stageLabels = {
+  discovery: 'Discovery',
+  sprint: 'Sprint',
+  qa: 'QA',
+  uat: 'UAT',
+  prod: 'Prod',
+  blocked: 'Blocked'
+};
+
+// Alerts
+const alertsEl = document.getElementById('alerts');
+const dangerThreshold = 150;
+const warnThreshold = 90;
+
+const alertProjects = projects
+  .filter(p => (p.stage === 'sprint' || p.stage === 'qa') && p.days >= warnThreshold)
+  .sort((a, b) => b.days - a.days);
+
+alertProjects.forEach(p => {
+  const isDanger = p.days >= dangerThreshold;
+  alertsEl.innerHTML += `
+    <div class="alert ${isDanger ? 'danger' : 'warn'}">
+      <span class="alert-icon">${isDanger ? '🔴' : '🟡'}</span>
+      <span class="alert-text"><strong>${p.client}</strong> has been in ${stageLabels[p.stage]} for ${p.days} days (since ${p.since})</span>
+    </div>`;
+});
+
+// Pipeline donut
+const stageCounts = {};
+projects.forEach(p => { stageCounts[p.stage] = (stageCounts[p.stage] || 0) + 1; });
+
+new Chart(document.getElementById('pipelineChart'), {
+  type: 'doughnut',
+  data: {
+    labels: Object.keys(stageCounts).map(s => stageLabels[s]),
+    datasets: [{
+      data: Object.values(stageCounts),
+      backgroundColor: Object.keys(stageCounts).map(s => stageColors[s]),
+      borderWidth: 0,
+      borderRadius: 4,
+      spacing: 3
+    }]
+  },
+  options: {
+    responsive: true,
+    maintainAspectRatio: false,
+    cutout: '65%',
+    plugins: {
+      legend: { position: 'right', labels: { color: '#9ca3af', padding: 16, font: { size: 13 } } }
+    }
+  }
+});
+
+// Aging comparison bar chart
+const sprintData = projects.filter(p => p.stage === 'sprint').sort((a, b) => b.days - a.days);
+const qaData = projects.filter(p => p.stage === 'qa').sort((a, b) => b.days - a.days);
+const allAging = [...sprintData, ...qaData].sort((a, b) => b.days - a.days).slice(0, 10);
+
+new Chart(document.getElementById('agingChart'), {
+  type: 'bar',
+  data: {
+    labels: allAging.map(p => p.client),
+    datasets: [{
+      data: allAging.map(p => p.days),
+      backgroundColor: allAging.map(p => p.days >= dangerThreshold ? '#f87171' : p.days >= warnThreshold ? '#fbbf24' : '#60a5fa'),
+      borderRadius: 6,
+      borderSkipped: false
+    }]
+  },
+  options: {
+    responsive: true,
+    maintainAspectRatio: false,
+    indexAxis: 'y',
+    plugins: { legend: { display: false } },
+    scales: {
+      x: { grid: { color: '#2d3140' }, ticks: { color: '#6b7280' }, title: { display: true, text: 'Days in Stage', color: '#6b7280' } },
+      y: { grid: { display: false }, ticks: { color: '#e1e4e8', font: { size: 12 } } }
+    }
+  }
+});
+
+// Sprint aging horizontal bar
+new Chart(document.getElementById('sprintAgingChart'), {
+  type: 'bar',
+  data: {
+    labels: sprintData.map(p => p.client),
+    datasets: [{
+      label: 'Days in Sprint',
+      data: sprintData.map(p => p.days),
+      backgroundColor: sprintData.map(p => p.days >= dangerThreshold ? '#f87171' : p.days >= warnThreshold ? '#fbbf24' : '#60a5fa'),
+      borderRadius: 6,
+      borderSkipped: false
+    }]
+  },
+  options: {
+    responsive: true,
+    maintainAspectRatio: false,
+    indexAxis: 'y',
+    plugins: { legend: { display: false } },
+    scales: {
+      x: { grid: { color: '#2d3140' }, ticks: { color: '#6b7280' } },
+      y: { grid: { display: false }, ticks: { color: '#e1e4e8', font: { size: 13 } } }
+    }
+  }
+});
+
+// QA aging horizontal bar
+new Chart(document.getElementById('qaAgingChart'), {
+  type: 'bar',
+  data: {
+    labels: qaData.map(p => p.client),
+    datasets: [{
+      label: 'Days in QA',
+      data: qaData.map(p => p.days),
+      backgroundColor: qaData.map(p => p.days >= dangerThreshold ? '#f87171' : p.days >= warnThreshold ? '#fbbf24' : '#fbbf24'),
+      borderRadius: 6,
+      borderSkipped: false
+    }]
+  },
+  options: {
+    responsive: true,
+    maintainAspectRatio: false,
+    indexAxis: 'y',
+    plugins: { legend: { display: false } },
+    scales: {
+      x: { grid: { color: '#2d3140' }, ticks: { color: '#6b7280' } },
+      y: { grid: { display: false }, ticks: { color: '#e1e4e8', font: { size: 13 } } }
+    }
+  }
+});
+
+// Project table
+const tbody = document.querySelector('#projectTable tbody');
+
+function renderTable(filter) {
+  const filtered = filter === 'all' ? projects : projects.filter(p => p.stage === filter);
+  filtered.sort((a, b) => (b.days || 0) - (a.days || 0));
+
+  tbody.innerHTML = filtered.map(p => {
+    const daysClass = p.days >= dangerThreshold ? 'days-danger' : p.days >= warnThreshold ? 'days-warn' : '';
+    const daysText = p.days !== null ? `${p.days}` : '—';
+    return `<tr data-stage="${p.stage}">
+      <td><strong>${p.client}</strong></td>
+      <td style="color:#6b7280; font-size:13px">${p.channel}</td>
+      <td><span class="badge ${p.stage}">${stageLabels[p.stage]}</span></td>
+      <td style="color:#9ca3af">${p.since}</td>
+      <td class="days-cell ${daysClass}" style="text-align:right">${daysText}</td>
+    </tr>`;
+  }).join('');
+}
+
+function filterTable(stage) {
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  event.target.classList.add('active');
+  renderTable(stage);
+}
+
+renderTable('all');
+</script>
+</body>
+</html>
