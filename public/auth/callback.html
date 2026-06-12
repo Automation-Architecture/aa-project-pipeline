@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Signing you in…</title>
+    <style>
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #f9f7f2;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        color: #004d43;
+      }
+      .box { text-align: center; }
+      .spin {
+        width: 28px;
+        height: 28px;
+        border: 3px solid #d8d8d8;
+        border-top-color: #004d43;
+        border-radius: 50%;
+        margin: 0 auto 14px;
+        animation: r 0.8s linear infinite;
+      }
+      @keyframes r { to { transform: rotate(360deg); } }
+      a { color: #004d43; }
+    </style>
+  </head>
+  <body>
+    <div class="box">
+      <div class="spin"></div>
+      <div id="msg">Signing you in…</div>
+    </div>
+    <script type="module">
+      import { createBrowserClient } from "https://esm.sh/@supabase/ssr@0.10.3";
+
+      const SUPABASE_URL = "https://qmdblnaqpylbnufvarcu.supabase.co";
+      const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFtZGJsbmFxcHlsYm51ZnZhcmN1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEyNjc5NjQsImV4cCI6MjA5Njg0Mzk2NH0.MykVoRstXhS7NUdq55rEt0HnsLPartu3wX1kt8DbI5A";
+      const supabase = createBrowserClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+      const params = new URLSearchParams(location.search);
+      function fail() {
+        location.replace("/login?error=auth");
+      }
+
+      let done = false;
+      function go() {
+        if (done) return;
+        done = true;
+        location.replace("/");
+      }
+
+      if (params.get("error")) {
+        // Provider returned an explicit error (e.g. user cancelled) — bail now,
+        // don't also wire up the session listeners (avoids racing redirects).
+        fail();
+      } else {
+        // The browser client auto-detects the code/token in the URL and exchanges
+        // it for a session (setting the sb-<ref>-auth-token cookie the edge gate
+        // reads). When the session lands, head to the dashboard.
+        supabase.auth.onAuthStateChange((_event, session) => {
+          if (session) go();
+        });
+
+        // Belt-and-suspenders: if the listener didn't fire, check directly.
+        supabase.auth.getSession().then(({ data }) => {
+          if (data.session) go();
+        });
+
+        // Give up if no session materialises.
+        setTimeout(() => {
+          if (!done) fail();
+        }, 8000);
+      }
+    </script>
+  </body>
+</html>
