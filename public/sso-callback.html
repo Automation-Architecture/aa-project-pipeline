@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Signing you in…</title>
+    <style>
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #f9f7f2;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        color: #004d43;
+      }
+      .box { text-align: center; }
+      .spin {
+        width: 28px;
+        height: 28px;
+        border: 3px solid #d8d8d8;
+        border-top-color: #004d43;
+        border-radius: 50%;
+        margin: 0 auto 14px;
+        animation: r 0.8s linear infinite;
+      }
+      @keyframes r { to { transform: rotate(360deg); } }
+      a { color: #004d43; }
+    </style>
+  </head>
+  <body>
+    <div class="box">
+      <div class="spin"></div>
+      <div id="msg">Signing you in…</div>
+    </div>
+    <script type="module">
+      function clerkFrontendApi(publishableKey) {
+        const encoded = publishableKey.split("_")[2] || "";
+        return atob(encoded).replace(/\$+$/, "");
+      }
+
+      function loadScript(src) {
+        return new Promise((resolve, reject) => {
+          const script = document.createElement("script");
+          script.src = src;
+          script.async = true;
+          script.crossOrigin = "anonymous";
+          script.onload = resolve;
+          script.onerror = () => reject(new Error("Failed to load Clerk"));
+          document.head.appendChild(script);
+        });
+      }
+
+      try {
+        const res = await fetch("/api/clerk-config", { cache: "no-store" });
+        if (!res.ok) throw new Error("Clerk config unavailable");
+        const { publishableKey } = await res.json();
+        if (!publishableKey) throw new Error("missing key");
+
+        const fapi = clerkFrontendApi(publishableKey);
+        await loadScript(`https://${fapi}/npm/@clerk/clerk-js@5/dist/clerk.browser.js`);
+        const clerk = new window.Clerk(publishableKey);
+        await clerk.load({
+          signInUrl: "/login",
+          afterSignInUrl: "/",
+        });
+        location.replace(clerk.isSignedIn ? "/" : "/login");
+      } catch {
+        location.replace("/login?error=auth");
+      }
+    </script>
+  </body>
+</html>

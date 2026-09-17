@@ -28,7 +28,7 @@
       }
       .card {
         width: 100%;
-        max-width: 380px;
+        max-width: 420px;
         background: #fff;
         border: 1px solid var(--divider);
         border-radius: 16px;
@@ -44,7 +44,7 @@
       }
       h1 { font-size: 20px; color: var(--teal); margin: 4px 0 0; }
       .sub { font-size: 14px; color: var(--body); margin-top: 8px; }
-      button, input {
+      button {
         font-family: inherit;
         font-size: 14px;
       }
@@ -59,34 +59,12 @@
         margin-top: 16px;
       }
       .btn:hover { background: var(--cream); }
-      .btn-primary {
-        background: var(--teal);
-        color: #fff;
-        border: none;
-        font-weight: 600;
-      }
-      .btn-primary:hover { opacity: 0.9; background: var(--teal); }
-      .btn:disabled { opacity: 0.5; cursor: default; }
-      .sep { display: flex; align-items: center; gap: 12px; margin: 18px 0; }
-      .sep hr { flex: 1; border: none; border-top: 1px solid var(--divider); }
-      .sep span { font-size: 12px; color: var(--gray); }
-      input[type="email"] {
-        width: 100%;
-        border: 1px solid var(--divider);
-        border-radius: 10px;
-        padding: 11px;
-        margin-top: 4px;
-      }
-      input[type="email"]:focus {
-        outline: none;
-        border-color: var(--teal);
-        box-shadow: 0 0 0 2px rgba(0, 77, 67, 0.2);
-      }
       .msg { font-size: 13px; margin-top: 16px; border-radius: 10px; padding: 12px; }
       .msg-ok { color: var(--teal); background: rgba(230, 255, 43, 0.3); }
       .msg-err { color: #b00020; background: #fdecea; }
       .hidden { display: none; }
       .foot { font-size: 11px; color: var(--gray); margin-top: 20px; }
+      #signin { margin-top: 16px; }
     </style>
   </head>
   <body>
@@ -95,27 +73,14 @@
       <h1>AAA Internal · Sign in</h1>
       <p class="sub">Internal tool — authorized access only.</p>
 
-      <div id="signin">
-        <form id="magic">
-          <input
-            id="email"
-            type="email"
-            required
-            placeholder="you@automationarchitecture.ai"
-            autocomplete="email"
-          />
-          <button class="btn btn-primary" id="send" type="submit">
-            Email me a sign-in link
-          </button>
-        </form>
-      </div>
+      <div id="signin"></div>
 
       <div id="forbidden" class="hidden">
         <div class="msg msg-err">
           This account isn’t authorized for the founder view. Sign in with an
           authorized account.
         </div>
-        <button class="btn" id="switch">Sign out &amp; use another account</button>
+        <button class="btn" id="switch" type="button">Sign out &amp; use another account</button>
       </div>
 
       <div id="status" class="msg hidden"></div>
@@ -123,12 +88,7 @@
     </div>
 
     <script type="module">
-      import { createBrowserClient } from "https://esm.sh/@supabase/ssr@0.10.3";
-
-      const SUPABASE_URL = "https://qmdblnaqpylbnufvarcu.supabase.co";
-      const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFtZGJsbmFxcHlsYm51ZnZhcmN1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEyNjc5NjQsImV4cCI6MjA5Njg0Mzk2NH0.MykVoRstXhS7NUdq55rEt0HnsLPartu3wX1kt8DbI5A";
-      const supabase = createBrowserClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
+      const ALLOWED = "brad@automationarchitecture.ai";
       const params = new URLSearchParams(location.search);
       const $ = (id) => document.getElementById(id);
       const status = $("status");
@@ -140,36 +100,92 @@
         show(status);
       }
 
-      if (params.get("error") === "forbidden") {
-        hide($("signin"));
-        show($("forbidden"));
-      } else if (params.get("error") === "auth") {
-        setStatus("Sign-in failed — please try again.", false);
-      } else {
-        // Already signed in (and refreshable)? Bounce to the dashboard; the edge
-        // gate re-checks the allowlist. Skipped when an error param is present to
-        // avoid a redirect loop on the forbidden case.
-        supabase.auth.getSession().then(({ data }) => {
-          if (data.session) location.replace("/");
+      function clerkFrontendApi(publishableKey) {
+        const encoded = publishableKey.split("_")[2] || "";
+        return atob(encoded).replace(/\$+$/, "");
+      }
+
+      function loadScript(src) {
+        return new Promise((resolve, reject) => {
+          const script = document.createElement("script");
+          script.src = src;
+          script.async = true;
+          script.crossOrigin = "anonymous";
+          script.onload = resolve;
+          script.onerror = () => reject(new Error("Failed to load Clerk"));
+          document.head.appendChild(script);
         });
       }
 
-      $("magic").addEventListener("submit", async (e) => {
-        e.preventDefault();
-        const email = $("email").value.trim();
-        $("send").disabled = true;
-        const { error } = await supabase.auth.signInWithOtp({
-          email,
-          options: { emailRedirectTo: location.origin + "/auth/callback" },
-        });
-        $("send").disabled = false;
-        if (error) setStatus(error.message, false);
-        else setStatus("Check your inbox — the sign-in link is on its way.", true);
-      });
+      function sessionEmail(clerk) {
+        const user = clerk.user;
+        if (!user) return "";
+        return (
+          user.primaryEmailAddress?.emailAddress ||
+          user.emailAddresses?.[0]?.emailAddress ||
+          ""
+        )
+          .trim()
+          .toLowerCase();
+      }
 
-      $("switch").addEventListener("click", async () => {
-        await supabase.auth.signOut();
-        location.href = "/login";
+      async function boot() {
+        const res = await fetch("/api/clerk-config", { cache: "no-store" });
+        if (!res.ok) throw new Error("Clerk config unavailable");
+        const { publishableKey } = await res.json();
+        if (!publishableKey) {
+          setStatus("Sign-in is not configured (missing CLERK_PUBLISHABLE_KEY).", false);
+          return;
+        }
+
+        const fapi = clerkFrontendApi(publishableKey);
+        await loadScript(`https://${fapi}/npm/@clerk/clerk-js@5/dist/clerk.browser.js`);
+        const clerk = new window.Clerk(publishableKey);
+        await clerk.load({
+          signInUrl: "/login",
+          signUpUrl: "/login",
+          afterSignInUrl: "/",
+          afterSignUpUrl: "/",
+        });
+
+        const forbidden = params.get("error") === "forbidden";
+        const email = sessionEmail(clerk);
+
+        if (clerk.isSignedIn && email === ALLOWED && !forbidden) {
+          location.replace("/");
+          return;
+        }
+
+        if (forbidden || (clerk.isSignedIn && email && email !== ALLOWED)) {
+          hide($("signin"));
+          show($("forbidden"));
+          $("switch").addEventListener("click", async () => {
+            await clerk.signOut();
+            location.href = "/login";
+          });
+          return;
+        }
+
+        if (params.get("error") === "auth") {
+          setStatus("Sign-in failed — please try again.", false);
+        }
+
+        clerk.mountSignIn($("signin"), {
+          routing: "hash",
+          forceRedirectUrl: "/",
+          appearance: {
+            variables: {
+              colorPrimary: "#004d43",
+              colorBackground: "#ffffff",
+              colorText: "#010101",
+              borderRadius: "10px",
+            },
+          },
+        });
+      }
+
+      boot().catch((err) => {
+        setStatus(err.message || "Sign-in failed — please try again.", false);
       });
     </script>
   </body>
