@@ -1,123 +1,133 @@
-// Supabase session gate for an internal AAA dashboard (static single-page app).
+// Clerk session gate for an internal AAA dashboard (static single-page app).
 //
-// Same edge-gating pattern as the run-rate dashboard: access requires (1) a valid
-// Supabase session, AND (2) the session email being on the ALLOWED_EMAILS allowlist.
-// The dashboard HTML is never returned to an unauthenticated/unauthorized browser —
-// gating happens here at the edge, before the static file (public/index.html) is served.
+// AAA-769 Phase 1: replaces shared Supabase Auth (aaa-internal-auth /
+// qmdblnaqpylbnufvarcu) with Clerk. Access requires (1) a valid Clerk
+// session, AND (2) the session email being exactly
+// brad@automationarchitecture.ai. The dashboard HTML is never returned to
+// an unauthenticated/unauthorized browser — gating happens here at the
+// edge, before the static file (public/index.html) is served.
 //
-// Dependency-free on purpose (no package.json / no bundle): reads the Supabase session
-// cookie, validates the access token against Supabase's /auth/v1/user endpoint, and
-// checks the email allowlist. Env vars (Vercel production target; values never in repo):
-//   SUPABASE_ANON_KEY  — publishable anon key, sent as the apikey header
-//   ALLOWED_EMAILS     — comma-separated allowlist (the real access gate)
-// Auth backend: the shared aaa-internal-auth Supabase project (magic-link, auth only).
+// Env vars (Vercel production target; values never in repo):
+//   CLERK_PUBLISHABLE_KEY  — pk_live_… / pk_test_… (also used by login JS)
+//   CLERK_SECRET_KEY       — sk_live_… / sk_test_… (edge verification)
+//   CLERK_JWT_KEY          — optional PEM public key for networkless JWT verify
+// Shared-auth anon keys are not used. ALLOWED_EMAILS is not read — a mis-set
+// env var must not widen the allowlist.
+
+import { createClerkClient } from "@clerk/backend";
 
 export const config = { matcher: "/:path*" };
 
-const REF = "qmdblnaqpylbnufvarcu"; // shared aaa-internal-auth Supabase project (auth only, magic-link)
-const COOKIE = `sb-${REF}-auth-token`;
+export const ALLOWED_EMAILS = Object.freeze([
+  "brad@automationarchitecture.ai",
+]);
 
-function getAllowed() {
-  return (process.env.ALLOWED_EMAILS || "")
-    .split(",")
-    .map((s) => s.trim().toLowerCase())
-    .filter(Boolean);
+export function isAllowedEmail(email) {
+  const normalized = String(email || "")
+    .trim()
+    .toLowerCase();
+  return Boolean(normalized) && ALLOWED_EMAILS.includes(normalized);
 }
 
-function parseCookies(header) {
-  const out = {};
-  (header || "").split(/; */).forEach((p) => {
-    const i = p.indexOf("=");
-    if (i > 0) {
-      const k = p.slice(0, i).trim();
-      const v = p.slice(i + 1);
-      // A malformed percent-escape would make decodeURIComponent throw — which in
-      // edge middleware 500s the request. Fall back to the raw value instead.
-      try {
-        out[k] = decodeURIComponent(v);
-      } catch {
-        out[k] = v;
-      }
-    }
+export function isAcmePath(pathname) {
+  return pathname.startsWith("/.well-known/");
+}
+
+export function isPublicPath(pathname) {
+  return (
+    pathname === "/login" ||
+    pathname === "/login.html" ||
+    pathname.startsWith("/login/") ||
+    pathname === "/favicon.ico" ||
+    pathname === "/sso-callback" ||
+    pathname === "/sso-callback.html" ||
+    pathname === "/api/clerk-config" ||
+    pathname.startsWith("/auth/")
+  );
+}
+
+export function emailFromClaims(claims) {
+  if (!claims || typeof claims !== "object") return "";
+  const raw =
+    claims.email ||
+    claims.email_address ||
+    claims.primary_email_address ||
+    "";
+  return String(raw).trim().toLowerCase();
+}
+
+function getClerk() {
+  return createClerkClient({
+    secretKey: process.env.CLERK_SECRET_KEY || "",
+    publishableKey: process.env.CLERK_PUBLISHABLE_KEY || "",
   });
-  return out;
 }
 
-function b64urlToString(b64url) {
-  let b64 = b64url.replace(/-/g, "+").replace(/_/g, "/");
-  while (b64.length % 4) b64 += "=";
-  const bin = atob(b64);
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  return new TextDecoder("utf-8").decode(bytes);
-}
+async function sessionEmail(clerk, requestState) {
+  const auth = requestState.toAuth();
+  if (!auth?.userId) return "";
 
-// Reassemble the (possibly chunked) @supabase/ssr session cookie and pull the
-// access token out. Value is "base64-<base64url(JSON session)>", split across
-// sb-<ref>-auth-token.0/.1/... when it exceeds the cookie size limit.
-function extractAccessToken(cookies) {
-  let raw = cookies[COOKIE];
-  if (raw === undefined) {
-    const chunks = [];
-    for (let i = 0; cookies[`${COOKIE}.${i}`] !== undefined; i++) {
-      chunks.push(cookies[`${COOKIE}.${i}`]);
-    }
-    if (!chunks.length) return null;
-    raw = chunks.join("");
-  }
-  if (!raw) return null;
-  let json = raw;
-  if (raw.startsWith("base64-")) {
-    try {
-      json = b64urlToString(raw.slice(7));
-    } catch {
-      return null;
-    }
-  }
+  const fromClaims = emailFromClaims(auth.sessionClaims);
+  if (fromClaims) return fromClaims;
+
   try {
-    const session = JSON.parse(json);
-    if (Array.isArray(session)) return session[0] || null;
-    return session.access_token || null;
+    const user = await clerk.users.getUser(auth.userId);
+    return (
+      user.primaryEmailAddress?.emailAddress ||
+      user.emailAddresses?.[0]?.emailAddress ||
+      ""
+    )
+      .trim()
+      .toLowerCase();
   } catch {
-    return null;
+    return "";
   }
 }
 
 export default async function middleware(req) {
-  const { pathname } = new URL(req.url);
+  const { pathname, origin } = new URL(req.url);
 
   // ACME challenges must never be gated — blocking these stops TLS cert issuance
   // for any custom domain. Keep this first.
-  if (pathname.startsWith("/.well-known/")) return;
+  if (isAcmePath(pathname)) return;
 
   // Public auth surfaces (the login flow itself must be reachable unauthenticated).
-  if (
-    pathname === "/login" ||
-    pathname === "/login.html" ||
-    pathname === "/favicon.ico" ||
-    pathname.startsWith("/auth/")
-  ) {
-    return;
+  if (isPublicPath(pathname)) return;
+
+  const publishableKey = process.env.CLERK_PUBLISHABLE_KEY || "";
+  const secretKey = process.env.CLERK_SECRET_KEY || "";
+  if (!publishableKey || !secretKey) {
+    return Response.redirect(new URL("/login", req.url), 302);
   }
 
-  const token = extractAccessToken(parseCookies(req.headers.get("cookie")));
-  if (token) {
-    try {
-      const r = await fetch(`https://${REF}.supabase.co/auth/v1/user`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          apikey: process.env.SUPABASE_ANON_KEY || "",
-        },
-      });
-      if (r.ok) {
-        const user = await r.json();
-        const email = (user.email || "").toLowerCase();
-        if (email && getAllowed().includes(email)) return; // authorized → serve
-        return Response.redirect(new URL("/login?error=forbidden", req.url), 302);
+  try {
+    const clerk = getClerk();
+    const requestState = await clerk.authenticateRequest(req, {
+      secretKey,
+      publishableKey,
+      authorizedParties: [origin],
+      jwtKey: process.env.CLERK_JWT_KEY || undefined,
+    });
+
+    if (requestState.status === "handshake") {
+      if (requestState.headers.get("location")) {
+        return new Response(null, {
+          status: 307,
+          headers: requestState.headers,
+        });
       }
-    } catch {
-      // network/validation failure → treat as unauthenticated
+      return Response.redirect(new URL("/login", req.url), 302);
     }
+
+    if (!requestState.isAuthenticated) {
+      return Response.redirect(new URL("/login", req.url), 302);
+    }
+
+    const email = await sessionEmail(clerk, requestState);
+    if (isAllowedEmail(email)) return; // authorized → serve
+    return Response.redirect(new URL("/login?error=forbidden", req.url), 302);
+  } catch {
+    // network/validation failure → treat as unauthenticated
+    return Response.redirect(new URL("/login", req.url), 302);
   }
-  return Response.redirect(new URL("/login", req.url), 302);
 }

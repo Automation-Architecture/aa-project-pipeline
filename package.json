@@ -1,0 +1,12 @@
+{
+  "name": "aa-project-pipeline",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node -c middleware.js && node --test",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@clerk/backend": "^2.19.0"
+  }
+}

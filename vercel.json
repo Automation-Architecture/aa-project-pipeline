@@ -1,6 +1,8 @@
 {
   "rewrites": [
     { "source": "/login", "destination": "/login.html" },
+    { "source": "/login/:path*", "destination": "/login.html" },
+    { "source": "/sso-callback", "destination": "/sso-callback.html" },
     { "source": "/auth/callback", "destination": "/auth/callback.html" }
   ],
   "headers": [
