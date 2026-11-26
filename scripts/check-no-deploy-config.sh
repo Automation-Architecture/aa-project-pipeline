@@ -6,12 +6,11 @@ set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
 
-patterns=(
+# Matched at any depth (root included), e.g. apps/web/vercel.json.
+names=(
   'vercel.json'
-  '.vercel/*'
   'now.json'
   'netlify.toml'
-  '.netlify/*'
   'render.yaml'
   'fly.toml'
   'railway.json'
@@ -21,6 +20,14 @@ patterns=(
   'firebase.json'
   'amplify.yml'
 )
+dirs=(
+  '.vercel'
+  '.netlify'
+)
+
+patterns=()
+for n in "${names[@]}"; do patterns+=(":(glob)**/$n"); done
+for d in "${dirs[@]}"; do patterns+=(":(glob)**/$d/**"); done
 
 found=$(git ls-files -- "${patterns[@]}")
 if [ -n "$found" ]; then
